@@ -1,0 +1,16 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+
+# Local/OS
+.DS_Store
+
+# Keys and secrets
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.tfvars.backup
