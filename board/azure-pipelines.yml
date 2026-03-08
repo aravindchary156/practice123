@@ -1,0 +1,303 @@
+trigger:
+- master
+
+pool:
+  name: Newagent
+
+
+variables:
+
+# Variable group containing secrets
+- group: New variable group 04-Mar
+
+# Project variables
+- name: ACR_NAME
+  value: vcubedevopsacr001
+
+- name: IMAGE_NAME
+  value: boardgame
+
+- name: RESOURCE_GROUP
+  value: Deployment_RG
+
+- name: AKS_CLUSTER
+  value: vcubeakscluster
+
+
+############################################
+# STAGE 1 : TERRAFORM INFRASTRUCTURE
+############################################
+
+stages:
+
+- stage: InfraCD
+  displayName: Deploy Infrastructure
+
+  jobs:
+  - job: TerraformDeploy
+
+    steps:
+
+    - script: |
+
+        echo "Logging into Azure"
+
+        az login --service-principal \
+          --username $(ARM_CLIENT_ID) \
+          --password $(ARM_CLIENT_SECRET) \
+          --tenant $(ARM_TENANT_ID)
+
+        az account set --subscription $(ARM_SUBSCRIPTION_ID)
+
+        export ARM_CLIENT_ID=$(ARM_CLIENT_ID)
+        export ARM_CLIENT_SECRET=$(ARM_CLIENT_SECRET)
+        export ARM_SUBSCRIPTION_ID=$(ARM_SUBSCRIPTION_ID)
+        export ARM_TENANT_ID=$(ARM_TENANT_ID)
+
+        echo "Running Terraform"
+
+        cd terraform-azure-infra
+
+        terraform init -reconfigure
+        terraform validate
+        terraform plan -out=tfplan
+        terraform apply -auto-approve tfplan
+
+      displayName: Terraform Apply
+
+
+
+############################################
+# STAGE 2 : BUILD + SONARQUBE
+############################################
+
+- stage: CI
+  displayName: Build Application
+  dependsOn: InfraCD
+
+  jobs:
+  - job: Build
+
+    steps:
+
+    - script: |
+
+        echo "Building application using Maven wrapper"
+
+        cd board
+        chmod +x mvnw
+
+        ./mvnw clean verify sonar:sonar \
+          -Dsonar.projectKey=boardgame \
+          -Dsonar.projectName=boardgame \
+          -Dsonar.host.url=$(SONAR_HOST_URL) \
+          -Dsonar.login=$(SONAR_TOKEN)
+
+      displayName: Maven Build + Sonar
+
+
+    - script: |
+
+        echo "Checking JAR file"
+
+        ls -l board/target
+
+      displayName: Verify JAR
+
+    - task: PublishPipelineArtifact@1
+      displayName: Publish JAR Artifact
+      inputs:
+        targetPath: $(System.DefaultWorkingDirectory)/board/target
+        artifact: board-target
+        publishLocation: pipeline
+
+
+
+############################################
+# STAGE 3 : DOCKER BUILD + TRIVY SCAN
+############################################
+
+- stage: ContainerBuild
+  displayName: Build Container
+  dependsOn: CI
+
+  jobs:
+  - job: DockerBuild
+
+    steps:
+
+    - task: DownloadPipelineArtifact@2
+      displayName: Download JAR Artifact
+      inputs:
+        buildType: current
+        artifactName: board-target
+        targetPath: $(System.DefaultWorkingDirectory)/board/target
+
+    - script: |
+
+        echo "Verifying downloaded JAR"
+
+        ls -l $(System.DefaultWorkingDirectory)/board/target
+        ls $(System.DefaultWorkingDirectory)/board/target/*.jar
+
+      displayName: Verify Downloaded JAR
+
+    - script: |
+
+        echo "Debug workspace"
+
+        pwd
+        ls -R
+
+      displayName: Debug Workspace
+
+
+    - script: |
+
+        echo "Building Docker Image"
+
+        docker build -f board/Dockerfile \
+          -t $(IMAGE_NAME):$(Build.BuildId) \
+          board
+
+      displayName: Docker Build
+
+
+    - script: |
+
+        echo "Running Trivy Security Scan"
+
+        trivy image $(IMAGE_NAME):$(Build.BuildId)
+
+      displayName: Trivy Scan
+
+
+
+############################################
+# STAGE 4 : PUSH IMAGE TO ACR
+############################################
+
+- stage: PushImage
+  displayName: Push Docker Image
+  dependsOn: ContainerBuild
+
+  jobs:
+  - job: Push
+
+    steps:
+
+    - script: |
+
+        echo "Azure Login"
+
+        az login --service-principal \
+          --username $(ARM_CLIENT_ID) \
+          --password $(ARM_CLIENT_SECRET) \
+          --tenant $(ARM_TENANT_ID)
+
+        az account set --subscription $(ARM_SUBSCRIPTION_ID)
+
+      displayName: Azure Login
+
+
+    - script: |
+
+        echo "Login to Azure Container Registry"
+
+        az acr login --name $(ACR_NAME)
+
+      displayName: ACR Login
+
+
+    - script: |
+
+        echo "Tagging Docker Image"
+
+        docker tag $(IMAGE_NAME):$(Build.BuildId) \
+          $(ACR_NAME).azurecr.io/$(IMAGE_NAME):$(Build.BuildId)
+
+      displayName: Tag Image
+
+
+    - script: |
+
+        echo "Pushing Docker Image"
+
+        docker push \
+          $(ACR_NAME).azurecr.io/$(IMAGE_NAME):$(Build.BuildId)
+
+      displayName: Push Image
+
+
+
+############################################
+# STAGE 5 : DEPLOY TO AKS
+############################################
+
+- stage: Deploy
+  displayName: Deploy to AKS
+  dependsOn: PushImage
+
+  jobs:
+  - job: DeployApp
+
+    steps:
+
+    - script: |
+
+        echo "Azure Login"
+
+        az login --service-principal \
+          --username $(ARM_CLIENT_ID) \
+          --password $(ARM_CLIENT_SECRET) \
+          --tenant $(ARM_TENANT_ID)
+
+        az account set --subscription $(ARM_SUBSCRIPTION_ID)
+
+      displayName: Azure Login
+
+
+    - script: |
+
+        echo "Connecting to AKS cluster"
+
+        az aks get-credentials \
+          --resource-group $(RESOURCE_GROUP) \
+          --name $(AKS_CLUSTER) \
+          --overwrite-existing
+
+      displayName: AKS Login
+
+
+    - script: |
+
+        echo "Updating Kubernetes manifest"
+
+        IMAGE=$(ACR_NAME).azurecr.io/$(IMAGE_NAME):$(Build.BuildId)
+
+        sed -i "s|IMAGE_PLACEHOLDER|$IMAGE|g" board/k8s/deployment-service.yaml
+
+        cat board/k8s/deployment-service.yaml
+
+      displayName: Update Image
+
+
+    - script: |
+
+        echo "Deploying application"
+
+        kubectl apply -f board/k8s/
+
+      displayName: Deploy
+
+
+    - script: |
+
+        echo "Checking deployment"
+
+        kubectl rollout status deployment/boardgame-deployment --timeout=180s
+
+        kubectl get pods
+        kubectl get svc
+
+      displayName: Verify Deployment
