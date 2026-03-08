@@ -1,6 +1,11 @@
 pipeline {
     agent { label 'linux' }
 
+    options {
+        disableConcurrentBuilds()
+        timeout(time: 60, unit: 'MINUTES')
+        timestamps()
+    }
 
     environment {
         AWS_REGION = 'ap-south-1'
@@ -11,6 +16,7 @@ pipeline {
         K8S_NAMESPACE = 'default'
         IMAGE_TAG = "${BUILD_NUMBER}"
         IMAGE_URI = "${ECR_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${IMAGE_TAG}"
+        TRIVY_CACHE_DIR = "${WORKSPACE}/.trivycache"
     }
 
     stages {
@@ -23,7 +29,7 @@ pipeline {
         stage('Build + Unit Test') {
             steps {
                 dir('board') {
-                    sh 'mvn clean verify'
+                    sh 'mvn -B clean verify'
                 }
             }
         }
@@ -33,7 +39,7 @@ pipeline {
                 dir('board') {
                     withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
                         withSonarQubeEnv('sonarqube-server') {
-                            sh 'mvn sonar:sonar -Dsonar.token=$SONAR_TOKEN'
+                            sh 'mvn -B sonar:sonar -Dsonar.token=$SONAR_TOKEN'
                         }
                     }
                 }
@@ -59,7 +65,10 @@ pipeline {
 
         stage('Trivy Image Scan') {
             steps {
-                sh 'trivy image --exit-code 0 --severity CRITICAL ${IMAGE_URI}'
+                sh '''
+                  mkdir -p "${TRIVY_CACHE_DIR}"
+                  trivy image --cache-dir "${TRIVY_CACHE_DIR}" --exit-code 0 --severity CRITICAL "${IMAGE_URI}"
+                '''
             }
         }
 
@@ -119,7 +128,11 @@ pipeline {
 
     post {
         always {
-            sh 'docker image prune -f || true'
+            sh '''
+              docker image prune -f || true
+              docker builder prune -af || true
+              rm -rf "${TRIVY_CACHE_DIR}" || true
+            '''
         }
     }
 }
