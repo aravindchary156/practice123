@@ -1,9 +1,6 @@
 pipeline {
     agent { label 'linux' }
 
-
-   
-
     environment {
         AWS_REGION = 'ap-south-1'
         ECR_ACCOUNT_ID = '049419513053'
@@ -24,8 +21,7 @@ pipeline {
         stage('Build + Unit Test') {
             steps {
                 dir('board') {
-                    sh 'chmod +x mvnw'
-                    sh './mvnw clean verify'
+                    sh 'mvn clean verify'
                 }
             }
         }
@@ -35,7 +31,7 @@ pipeline {
                 dir('board') {
                     withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
                         withSonarQubeEnv('sonarqube-server') {
-                            sh './mvnw sonar:sonar -Dsonar.token=$SONAR_TOKEN'
+                            sh 'mvn sonar:sonar -Dsonar.token=$SONAR_TOKEN'
                         }
                     }
                 }
