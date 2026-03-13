@@ -32,7 +32,10 @@ pipeline {
         stage('Build + Unit Test') {
             steps {
                 dir("${APP_DIR}") {
-                    sh 'mvn -B clean verify'
+                    sh '''
+                      chmod +x mvnw
+                      ./mvnw -B clean verify
+                    '''
                 }
             }
         }
@@ -42,7 +45,10 @@ pipeline {
                 dir("${APP_DIR}") {
                     withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
                         withSonarQubeEnv('sonarqube') {
-                            sh 'mvn -B sonar:sonar -Dsonar.token=$SONAR_TOKEN'
+                            sh '''
+                              chmod +x mvnw
+                              ./mvnw -B sonar:sonar -Dsonar.token=$SONAR_TOKEN
+                            '''
                         }
                     }
                 }
