@@ -33,8 +33,9 @@ pipeline {
             steps {
                 dir("${APP_DIR}") {
                     sh '''
+                      sed -i 's/\r$//' mvnw
                       chmod +x mvnw
-                      ./mvnw -B clean verify
+                      bash ./mvnw -B clean verify
                     '''
                 }
             }
@@ -46,8 +47,9 @@ pipeline {
                     withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
                         withSonarQubeEnv('sonarqube') {
                             sh '''
+                              sed -i 's/\r$//' mvnw
                               chmod +x mvnw
-                              ./mvnw -B sonar:sonar -Dsonar.token=$SONAR_TOKEN
+                              bash ./mvnw -B sonar:sonar -Dsonar.token=$SONAR_TOKEN
                             '''
                         }
                     }
