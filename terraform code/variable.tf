@@ -10,6 +10,12 @@ variable "instance_type" {
   default     = "t2.micro"
 }
 
+variable "sonarqube_instance_type" {
+  description = "EC2 instance type for the dedicated SonarQube VM"
+  type        = string
+  default     = "t3.small"
+}
+
 variable "ssh_key_name" {
   description = "SSH key pair name"
   type        = string
