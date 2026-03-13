@@ -33,6 +33,7 @@ sudo docker rm -f jenkins >/dev/null 2>&1 || true
 sudo docker volume create jenkins_home >/dev/null
 sudo docker run -d --name jenkins --restart unless-stopped \
   -p 8080:8080 -p 50000:50000 \
+  -e JAVA_OPTS="-Dorg.jenkinsci.plugins.durabletask.BourneShellScript.HEARTBEAT_CHECK_INTERVAL=86400" \
   -v jenkins_home:/var/jenkins_home \
   jenkins/jenkins:lts-jdk17
 
