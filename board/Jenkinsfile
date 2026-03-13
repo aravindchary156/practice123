@@ -12,6 +12,8 @@ pipeline {
         ECR_REPOSITORY = 'boardgame'
         EKS_CLUSTER_NAME = 'hackathon-eks'
         K8S_NAMESPACE = 'default'
+        APP_DIR = 'source/board'
+        GIT_REPO_URL = 'https://github.com/aravindchary156/practice123.git'
         IMAGE_TAG = "${BUILD_NUMBER}"
         IMAGE_URI = "${ECR_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${IMAGE_TAG}"
         TRIVY_CACHE_DIR = "${WORKSPACE}/.trivycache"
@@ -20,13 +22,16 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                git branch: 'main', url: 'https://github.com/aravindchary156/practice123.git'
+                sh '''
+                  rm -rf source
+                  git clone --branch main "${GIT_REPO_URL}" source
+                '''
             }
         }
 
         stage('Build + Unit Test') {
             steps {
-                dir('board') {
+                dir("${APP_DIR}") {
                     sh 'mvn -B clean verify'
                 }
             }
@@ -34,7 +39,7 @@ pipeline {
 
         stage('SonarQube Analysis') {
             steps {
-                dir('board') {
+                dir("${APP_DIR}") {
                     withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
                         withSonarQubeEnv('sonarqube') {
                             sh 'mvn -B sonar:sonar -Dsonar.token=$SONAR_TOKEN'
@@ -54,7 +59,7 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                dir('board') {
+                dir("${APP_DIR}") {
                     sh '''
                       docker build -t ${ECR_REPOSITORY}:${IMAGE_TAG} .
                       docker tag ${ECR_REPOSITORY}:${IMAGE_TAG} ${IMAGE_URI}
@@ -97,7 +102,7 @@ pipeline {
 
         stage('Deploy To EKS') {
             steps {
-                dir('board') {
+                dir("${APP_DIR}") {
                     sh '''
                       aws eks update-kubeconfig --region ${AWS_REGION} --name ${EKS_CLUSTER_NAME}
                       sed "s|IMAGE_PLACEHOLDER|${IMAGE_URI}|g" k8s/deployment-service.yaml > k8s/rendered-deployment.yaml
