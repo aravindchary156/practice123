@@ -5,8 +5,13 @@ set -euo pipefail
 sudo rm -f /etc/apt/sources.list.d/jenkins.list
 sudo rm -f /etc/apt/keyrings/jenkins-keyring.gpg
 
+sudo apt-get clean
+# Use the EC2 regional mirror to avoid corrupt InRelease downloads.
+sudo sed -i 's|http://archive.ubuntu.com/ubuntu|http://ap-south-1.ec2.archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list
+sudo sed -i 's|http://security.ubuntu.com/ubuntu|http://ap-south-1.ec2.archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list
 sudo apt update -y
-sudo apt install -y docker.io unzip wget apt-transport-https gnupg lsb-release curl ca-certificates fontconfig openjdk-17-jre
+# Avoid pulling unavailable recommended fonts on minimal images.
+sudo apt install -y --no-install-recommends docker.io unzip wget apt-transport-https gnupg lsb-release curl ca-certificates fontconfig openjdk-17-jre
 
 sudo systemctl start docker
 sudo systemctl enable docker
